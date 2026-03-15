@@ -1,0 +1,7 @@
+streamlit>=1.32.0
+deep-translator
+pypinyin
+gTTS
+streamlit-drawable-canvas
+audio-recorder-streamlit
+SpeechRecognition
