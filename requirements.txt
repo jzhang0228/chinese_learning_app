@@ -5,3 +5,5 @@ gTTS
 streamlit-drawable-canvas
 audio-recorder-streamlit
 SpeechRecognition
+streamlit-autorefresh
+extra-streamlit-components

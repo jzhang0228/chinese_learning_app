@@ -3,7 +3,9 @@ import io
 import json
 import os
 import random
+import secrets
 import sqlite3
+import time
 from dotenv import load_dotenv
 from pathlib import Path
 load_dotenv(Path(__file__).parent / ".env")
@@ -66,6 +68,11 @@ def _init_db():
                 username     TEXT PRIMARY KEY,
                 manual_level INTEGER
             );
+            CREATE TABLE IF NOT EXISTS sessions (
+                token      TEXT PRIMARY KEY,
+                username   TEXT NOT NULL,
+                created_at REAL NOT NULL
+            );
         """)
 
 _init_db()
@@ -88,7 +95,9 @@ NONOGRAM_PUZZLES = [
     [[0,0,1,0,0],[0,0,1,0,0],[1,1,1,1,1],[0,0,1,0,0],[0,0,1,0,0]],  # plus
 ]
 
+import datetime
 import streamlit as st
+import extra_streamlit_components as stx
 from gtts import gTTS
 from deep_translator import GoogleTranslator
 from pypinyin import pinyin as to_pinyin, Style
@@ -100,6 +109,8 @@ st.set_page_config(
     layout="centered",
     initial_sidebar_state="collapsed",
 )
+
+_cookie_mgr = stx.CookieManager(key="ck")
 
 st.markdown("""
 <style>
@@ -162,8 +173,14 @@ DEFAULTS = dict(
     sudoku_solution=None,
     sudoku_puzzle=None,
     puzzle_state=None,
-    # Memory match
+    # Memory match (reward)
     memory_cards=None, memory_first=None, memory_second=None, memory_won=False,
+    # Review games
+    review_memory_cards=None, review_memory_first=None, review_memory_second=None, review_memory_won=False,
+    # Sky Drop
+    sky_words=[], sky_score=0, sky_lives=3,
+    sky_audio=None, sky_done=False, sky_tick=0, sky_last_audio_hash=None,
+    sky_feedback=None, sky_feedback_type="success",
     # Lights out
     lights_grid=None, lights_won=False,
     # Minesweeper
@@ -179,6 +196,37 @@ for k, v in DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+# ─── Session token persistence (cookie) ───────────────────────────────────────
+def _create_session(username: str) -> str:
+    token = secrets.token_hex(32)
+    with _db() as con:
+        con.execute("DELETE FROM sessions WHERE created_at < ?", (time.time() - 30 * 86400,))
+        con.execute("INSERT INTO sessions (token, username, created_at) VALUES (?,?,?)",
+                    (token, username, time.time()))
+    return token
+
+def _validate_session(token: str) -> str | None:
+    with _db() as con:
+        row = con.execute("SELECT username FROM sessions WHERE token=?", (token,)).fetchone()
+    return row["username"] if row else None
+
+def _delete_session(token: str):
+    with _db() as con:
+        con.execute("DELETE FROM sessions WHERE token=?", (token,))
+
+# Restore session from cookie.
+# CookieManager needs one render cycle to read browser cookies, so we do
+# a single extra rerun on the very first page load (tracked by _ck_init).
+if not st.session_state.username:
+    _tok = _cookie_mgr.get("session_token")
+    if _tok:
+        _uname = _validate_session(_tok)
+        if _uname:
+            st.session_state.username = _uname
+    elif not st.session_state.get("_ck_init"):
+        st.session_state["_ck_init"] = True
+        st.rerun()
+
 # ─── Login / Register wall ─────────────────────────────────────────────────────
 if not st.session_state.username:
     st.title("🇨🇳 Learn Chinese")
@@ -191,6 +239,9 @@ if not st.session_state.username:
             if st.form_submit_button("Login", use_container_width=True, type="primary"):
                 if _login(lu, lp):
                     st.session_state.username = lu.strip().lower()
+                    _tok = _create_session(st.session_state.username)
+                    _cookie_mgr.set("session_token", _tok,
+                                    expires_at=datetime.datetime.now() + datetime.timedelta(days=30))
                     st.rerun()
                 else:
                     st.error("Invalid username or password.")
@@ -209,6 +260,9 @@ if not st.session_state.username:
                         st.error(err)
                     else:
                         st.session_state.username = ru.strip().lower()
+                        _tok = _create_session(st.session_state.username)
+                        _cookie_mgr.set("session_token", _tok,
+                                        expires_at=datetime.datetime.now() + datetime.timedelta(days=30))
                         st.rerun()
     st.stop()
 
@@ -520,6 +574,47 @@ def init_memory():
     st.session_state.memory_second = None
     st.session_state.memory_won = False
 
+# ─── Review games ─────────────────────────────────────────────────────────────
+def init_review_memory(learned: list[dict]):
+    pairs = random.sample(learned, min(8, len(learned)))
+    cards = []
+    for w in pairs:
+        cards.append({"chinese": w["chinese"], "english": w["english"], "flipped": False, "matched": False})
+        cards.append({"chinese": w["chinese"], "english": w["english"], "flipped": False, "matched": False})
+    random.shuffle(cards)
+    st.session_state.review_memory_cards = cards
+    st.session_state.review_memory_first = None
+    st.session_state.review_memory_second = None
+    st.session_state.review_memory_won = False
+
+# ─── Sky Drop ─────────────────────────────────────────────────────────────────
+def _sky_spawn(learned: list[dict], existing_chars: set, start_y: int = 0):
+    """Pick a random unshown learned word and add it at start_y."""
+    pool = [w for w in learned if w["chinese"] not in existing_chars]
+    if not pool:
+        return
+    w = random.choice(pool)
+    st.session_state.sky_words.append({
+        "chinese": w["chinese"], "pinyin": w["pinyin"],
+        "english": w["english"],
+        "y": start_y,
+        "x": random.randint(15, 80),
+    })
+
+def init_sky_drop(learned: list[dict]):
+    st.session_state.sky_words          = []
+    st.session_state.sky_score          = 0
+    st.session_state.sky_lives          = 3
+    st.session_state.sky_audio          = None
+    st.session_state.sky_done           = False
+    st.session_state.sky_tick           = 0
+    st.session_state.sky_last_audio_hash = None
+    # Stagger 3 starting words: first visible, others above the screen
+    offsets = [0, -35, -65]
+    for offset in offsets[:min(3, len(learned))]:
+        existing = {w["chinese"] for w in st.session_state.sky_words}
+        _sky_spawn(learned, existing, start_y=offset)
+
 # ─── Lights Out ───────────────────────────────────────────────────────────────
 def _toggle(grid, r, c, size=5):
     for dr, dc in [(0,0),(1,0),(-1,0),(0,1),(0,-1)]:
@@ -627,6 +722,10 @@ with st.sidebar:
     st.markdown("## 🇨🇳 Chinese Learner")
     st.markdown(f"👤 **{st.session_state.username}**")
     if st.button("Logout", use_container_width=True):
+        _tok = _cookie_mgr.get("session_token")
+        if _tok:
+            _delete_session(_tok)
+        _cookie_mgr.delete("session_token")
         for k in list(st.session_state.keys()):
             del st.session_state[k]
         st.rerun()
@@ -657,16 +756,6 @@ with st.sidebar:
             st.markdown(f"**→ {name}**")
         else:
             st.markdown(f"&nbsp;&nbsp;{name}", unsafe_allow_html=True)
-
-    st.markdown("---")
-    with st.expander("🛠️ Dev Shortcuts"):
-        if st.button("✏️ Jump to Writing Quiz", use_container_width=True):
-            if not st.session_state.chinese_text:
-                st.session_state.english_word = "water"
-                st.session_state.chinese_text = "水"
-                st.session_state.pinyin_text  = "shuǐ"
-            st.session_state.writing_quiz_passed = False
-            go("writing_quiz")
 
     st.markdown("---")
     with st.expander("⚙️ Settings"):
@@ -767,6 +856,7 @@ if st.session_state.stage == "input":
                     go("learn")
         st.markdown("---")
 
+    st.markdown("---")
     st.markdown("### Or enter your own word:")
     word = st.text_input("Enter an English word or phrase:",
                          placeholder="e.g. hello, water, thank you…",
@@ -800,6 +890,19 @@ if st.session_state.stage == "input":
                     f"</div>",
                     unsafe_allow_html=True,
                 )
+
+    if len(learned) >= 2:
+        st.markdown("---")
+        st.markdown("### 📚 Review your words:")
+        rc1, rc2 = st.columns(2)
+        with rc1:
+            if st.button("🃏 Memory Match", use_container_width=True, help="Match characters with their meanings!"):
+                init_review_memory(learned)
+                go("review_memory")
+        with rc2:
+            if st.button("☁️ Sky Drop", use_container_width=True, help="Destroy falling words before they hit the ground!"):
+                init_sky_drop(learned)
+                go("sky_drop")
 
 # ─── Stage: LEARN ─────────────────────────────────────────────────────────────
 elif st.session_state.stage == "learn":
@@ -1546,3 +1649,306 @@ elif st.session_state.stage == "game":
         st.markdown("---")
         if st.button("🔄 Learn Another Word", use_container_width=True):
             reset_for_new_word()
+
+
+# ─── Stage: REVIEW — Memory Match ─────────────────────────────────────────────
+elif st.session_state.stage == "review_memory":
+    st.title("🃏 Memory Match — Your Words")
+    st.markdown("Match each Chinese character with its English meaning!")
+
+    cards  = st.session_state.review_memory_cards
+    first  = st.session_state.review_memory_first
+    second = st.session_state.review_memory_second
+
+    if cards is None:
+        go("input")
+    else:
+        n_cards = len(cards)
+        cols_per_row = 4
+
+        if second is not None:
+            c1, c2 = cards[first], cards[second]
+            if c1["chinese"] == c2["chinese"]:
+                cards[first]["matched"] = True
+                cards[second]["matched"] = True
+                st.session_state.review_memory_first = None
+                st.session_state.review_memory_second = None
+                if all(c["matched"] for c in cards):
+                    st.session_state.review_memory_won = True
+            else:
+                st.warning("No match! Click **Continue** to flip them back.")
+                if st.button("Continue", type="primary"):
+                    cards[first]["flipped"] = False
+                    cards[second]["flipped"] = False
+                    st.session_state.review_memory_first = None
+                    st.session_state.review_memory_second = None
+                    st.rerun()
+
+        if st.session_state.review_memory_won:
+            st.success("🎉 You matched all the pairs!")
+            st.balloons()
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("🔄 Play again", use_container_width=True, type="primary"):
+                    init_review_memory(load_learned_words())
+                    st.rerun()
+            with col_b:
+                if st.button("🏠 Home", use_container_width=True):
+                    go("input")
+
+        for row_start in range(0, n_cards, cols_per_row):
+            cols = st.columns(cols_per_row)
+            for col_idx, card_idx in enumerate(range(row_start, min(row_start + cols_per_row, n_cards))):
+                card = cards[card_idx]
+                with cols[col_idx]:
+                    if card["matched"]:
+                        st.markdown(
+                            f"<div style='background:#d4edda;border-radius:8px;padding:12px;"
+                            f"text-align:center;min-height:70px;display:flex;align-items:center;"
+                            f"justify-content:center;flex-direction:column;'>"
+                            f"<span style='font-size:28px;color:#c0392b;'>{card['chinese']}</span>"
+                            f"<small>{card['english']}</small></div>",
+                            unsafe_allow_html=True)
+                    elif card_idx in (first, second):
+                        show = card["chinese"] if card_idx == first else card["english"]
+                        st.markdown(
+                            f"<div style='background:#fff3cd;border-radius:8px;padding:12px;"
+                            f"text-align:center;font-size:22px;min-height:70px;"
+                            f"display:flex;align-items:center;justify-content:center;'>"
+                            f"{show}</div>",
+                            unsafe_allow_html=True)
+                    else:
+                        if st.button("?", key=f"rm_{card_idx}", use_container_width=True):
+                            if first is None:
+                                st.session_state.review_memory_first = card_idx
+                            elif second is None and card_idx != first:
+                                st.session_state.review_memory_second = card_idx
+                            st.rerun()
+
+        st.markdown("---")
+        if st.button("🏠 Quit", use_container_width=True):
+            go("input")
+
+# ─── Stage: SKY DROP ──────────────────────────────────────────────────────────
+elif st.session_state.stage == "sky_drop":
+    import json as _json
+    import streamlit.components.v1 as components
+
+    learned = load_learned_words()
+    st.title("☁️ Sky Drop")
+    if st.button("🏠 Home"):
+        go("input")
+
+    game_words = random.sample(learned, min(30, len(learned)))
+    words_json = _json.dumps([
+        {"chinese": w["chinese"], "pinyin": w["pinyin"], "english": w["english"]}
+        for w in game_words
+    ])
+
+    game_html = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:linear-gradient(180deg,#0f0c29 0%,#302b63 55%,#24243e 100%);
+     color:white;font-family:Arial,sans-serif;height:600px;overflow:hidden;position:relative}
+#hud{position:absolute;top:8px;left:12px;right:12px;display:flex;
+     justify-content:space-between;align-items:center;font-size:17px;z-index:10}
+#arena{position:absolute;top:40px;left:0;right:0;bottom:56px}
+.tile{position:absolute;background:rgba(255,255,255,0.13);
+      border:2px solid rgba(255,255,255,0.35);border-radius:10px;
+      padding:5px 13px;text-align:center;transform:translateX(-50%);
+      box-shadow:0 0 10px rgba(100,180,255,0.25);min-width:58px;pointer-events:none}
+.tile .ch{font-size:30px;font-weight:bold;line-height:1.1}
+.tile .py{font-size:11px;opacity:.75}
+.tile.boom{border-color:#e74c3c;background:rgba(231,76,60,.7);
+           box-shadow:0 0 22px #e74c3c;animation:explode .45s forwards}
+@keyframes explode{0%{transform:translateX(-50%) scale(1);opacity:1}
+                   60%{transform:translateX(-50%) scale(1.6);opacity:.8}
+                   100%{transform:translateX(-50%) scale(0);opacity:0}}
+#ground{position:absolute;bottom:56px;left:0;right:0;height:5px;
+        background:#c0392b;box-shadow:0 0 12px #c0392b}
+#glabel{position:absolute;bottom:62px;left:0;right:0;text-align:center;
+        color:rgba(255,80,80,.8);font-size:10px;letter-spacing:3px}
+#mic-bar{position:absolute;bottom:0;left:0;right:0;height:56px;
+         background:rgba(0,0,0,.45);display:flex;align-items:center;padding:0 14px;gap:10px}
+#dot{width:12px;height:12px;border-radius:50%;background:#555;flex-shrink:0}
+#dot.on{background:#2ecc71;animation:pulse 1s infinite}
+#dot.speak{background:#e74c3c;animation:pulse .3s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.3)}}
+#mic-txt{flex:1;font-size:13px;color:#aaa}
+#heard{font-size:12px;color:#f1c40f;min-width:80px;text-align:right}
+#over,#winover{display:none;position:absolute;top:0;left:0;right:0;bottom:0;
+      background:rgba(0,0,0,.88);flex-direction:column;align-items:center;
+      justify-content:center;gap:14px;z-index:50}
+#over h1{color:#e74c3c;font-size:34px}
+#winover h1{color:#2ecc71;font-size:34px}
+#over .sc,#winover .sc{font-size:22px}
+#over small,#winover small{color:#aaa;font-size:13px}
+</style></head><body>
+<div id="hud">
+  <span id="hrt">❤️❤️❤️</span>
+  <span id="sc">Score: 0</span>
+  <span id="spd"></span>
+</div>
+<div id="arena"></div>
+<div id="glabel">⚠ GROUND</div>
+<div id="ground"></div>
+<div id="mic-bar">
+  <div id="dot"></div>
+  <div id="mic-txt">Starting mic…</div>
+  <div id="heard"></div>
+</div>
+<div id="over">
+  <h1>💀 Game Over</h1>
+  <div class="sc">Score: <b id="fscore">0</b></div>
+  <small>Click 🏠 Home above to exit</small>
+</div>
+<div id="winover">
+  <h1>🎉 You Win!</h1>
+  <div class="sc">Score: <b id="win-score">0</b></div>
+  <small>All words destroyed! Click 🏠 Home above.</small>
+</div>
+<script>
+const WORDS = """ + words_json + """;
+let tiles=[], score=0, lives=3, dead=false;
+const spawnCounts={};  // chinese → times spawned
+const MAX_SPAWNS=2;
+
+const arena  = document.getElementById('arena');
+const hrtEl  = document.getElementById('hrt');
+const scEl   = document.getElementById('sc');
+const spdEl  = document.getElementById('spd');
+const dotEl  = document.getElementById('dot');
+const txtEl  = document.getElementById('mic-txt');
+const heardEl= document.getElementById('heard');
+const overEl = document.getElementById('over');
+
+function hud(){
+  hrtEl.textContent = '❤️'.repeat(lives)+'🖤'.repeat(Math.max(0,3-lives));
+  scEl.textContent  = 'Score: '+score;
+  const s=1+Math.floor(score/5); spdEl.textContent = s>1?'🚀 x'+s:'';
+}
+function speed(){ return 0.3+Math.floor(score/5)*0.15; }
+
+function allDone(){
+  const canSpawn=WORDS.some(w=>(spawnCounts[w.chinese]||0)<MAX_SPAWNS);
+  return !canSpawn && tiles.length===0;
+}
+
+function spawn(startY){
+  const onScreen=new Set(tiles.map(t=>t.word.chinese));
+  const pool=WORDS.filter(w=>!onScreen.has(w.chinese)&&(spawnCounts[w.chinese]||0)<MAX_SPAWNS);
+  if(!pool.length) return;
+  const w=pool[Math.floor(Math.random()*pool.length)];
+  spawnCounts[w.chinese]=(spawnCounts[w.chinese]||0)+1;
+  const shown=spawnCounts[w.chinese];
+  const dots='●'.repeat(shown)+'○'.repeat(MAX_SPAWNS-shown);
+  const x=15+Math.random()*70;
+  const el=document.createElement('div');
+  el.className='tile';
+  el.innerHTML=`<div class="ch">${w.chinese}</div><div style="font-size:9px;opacity:.6;letter-spacing:2px">${dots}</div>`;
+  el.style.left=x+'%';
+  el.style.top=(startY||0)+'px';
+  arena.appendChild(el);
+  tiles.push({word:w, el, y:startY||0});
+}
+
+function destroy(tile){
+  tile.el.classList.add('boom');
+  tiles=tiles.filter(t=>t!==tile);
+  setTimeout(()=>{
+    tile.el.remove();
+    if(dead) return;
+    if(allDone()){ winGame(); return; }
+    spawn(-10);
+  }, 450);
+}
+
+// match: any CJK char from word.chinese appears in transcript
+function matches(transcript, chinese){
+  return [...chinese].some(c=>transcript.includes(c));
+}
+
+function checkSpeech(text){
+  heardEl.textContent='🗣 '+text;
+  for(const t of [...tiles]){
+    if(matches(text, t.word.chinese)){
+      destroy(t); score++; hud(); return;
+    }
+  }
+}
+
+// Animation loop
+let last=0;
+function tick(ts){
+  if(dead) return;
+  const dt=Math.min(ts-last, 100); last=ts;
+  const h=arena.clientHeight;
+  for(const t of [...tiles]){
+    t.y += speed()*(dt/50);
+    t.el.style.top=t.y+'px';
+    if(t.y >= h-10){
+      t.el.remove(); tiles=tiles.filter(x=>x!==t);
+      lives=Math.max(0,lives-1); hud();
+      if(lives<=0){ endGame(); return; }
+      if(allDone()){ winGame(); return; }
+      spawn(-10);
+    }
+  }
+  while(tiles.length<3){
+    const before=tiles.length; spawn(-10);
+    if(tiles.length===before) break; // pool exhausted, stop
+  }
+  if(allDone()){ winGame(); return; }
+  requestAnimationFrame(tick);
+}
+
+function endGame(){
+  dead=true;
+  if(recog){ try{recog.stop()}catch(e){} }
+  document.getElementById('fscore').textContent=score;
+  overEl.style.display='flex';
+}
+
+function winGame(){
+  dead=true;
+  if(recog){ try{recog.stop()}catch(e){} }
+  document.getElementById('win-score').textContent=score;
+  document.getElementById('winover').style.display='flex';
+}
+
+// Staggered initial spawn
+for(let i=0;i<Math.min(3,WORDS.length);i++) setTimeout(()=>spawn(-(i*120)), i*1200);
+hud();
+requestAnimationFrame(tick);
+
+// Web Speech API
+let recog=null;
+function startMic(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){ txtEl.textContent='❌ Use Chrome for speech support'; return; }
+  recog=new SR();
+  recog.lang='zh-CN';
+  recog.continuous=true;
+  recog.interimResults=true;
+  recog.onstart=()=>{ dotEl.className='on'; txtEl.textContent='🎤 Listening — say any word you see!'; };
+  recog.onspeechstart=()=>{ dotEl.className='speak'; };
+  recog.onspeechend=()=>{ dotEl.className='on'; };
+  recog.onresult=(e)=>{
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      // Use interim results for speed; final results for accuracy fallback
+      const text=e.results[i][0].transcript.trim();
+      if(text) checkSpeech(text);
+    }
+  };
+  recog.onerror=(e)=>{
+    dotEl.className='';
+    txtEl.textContent='⚠ Mic error ('+e.error+') — retrying…';
+    if(e.error!=='aborted'&&!dead) setTimeout(startMic,1200);
+  };
+  recog.onend=()=>{ if(!dead) setTimeout(startMic,300); };
+  recog.start();
+}
+startMic();
+</script></body></html>"""
+
+    components.html(game_html, height=620, scrolling=False)
