@@ -8,6 +8,17 @@ from dotenv import load_dotenv
 from pathlib import Path
 load_dotenv(Path(__file__).parent / ".env")
 
+# ─── Database backend selection ───────────────────────────────────────────────
+_DATABASE_URL = os.environ.get("DATABASE_URL")
+_USE_PG = bool(_DATABASE_URL)
+
+if _USE_PG:
+    import psycopg2
+    import psycopg2.extras
+    _IntegrityError = psycopg2.IntegrityError
+else:
+    _IntegrityError = sqlite3.IntegrityError
+
 # ─── Game constants ───────────────────────────────────────────────────────────
 MEMORY_PAIRS = [
     ("你好","Hello"),("谢谢","Thank you"),("水","Water"),("火","Fire"),
@@ -39,33 +50,84 @@ RECOMMENDED_WORDS = [
 ]
 
 CHARACTERS_FILE = Path(__file__).parent / "characters.csv"
-DB_FILE         = Path(__file__).parent / "app.db"
+_DB_FILE        = Path(__file__).parent / "app.db"
+
+class _PGCon:
+    """Thin psycopg2 wrapper that mimics the sqlite3 connection interface."""
+    def __init__(self):
+        self._con = psycopg2.connect(
+            _DATABASE_URL,
+            cursor_factory=psycopg2.extras.RealDictCursor
+        )
+
+    def execute(self, sql: str, params=()):
+        cur = self._con.cursor()
+        cur.execute(sql, params)
+        return cur
+
+    def commit(self):   self._con.commit()
+    def rollback(self): self._con.rollback()
+    def close(self):    self._con.close()
+
+    def __enter__(self): return self
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type: self.rollback()
+        else:        self.commit()
+        self.close()
+        return False
+
+
+class _SQLiteCon:
+    """Thin sqlite3 wrapper with the same interface as _PGCon.
+    Translates %s placeholders → ? so shared SQL strings work unchanged."""
+    def __init__(self):
+        self._con = sqlite3.connect(_DB_FILE)
+        self._con.row_factory = sqlite3.Row
+
+    def execute(self, sql: str, params=()):
+        return self._con.execute(sql.replace("%s", "?"), params)
+
+    def commit(self):   self._con.commit()
+    def rollback(self): self._con.rollback()
+    def close(self):    self._con.close()
+
+    def __enter__(self): return self
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type: self.rollback()
+        else:        self.commit()
+        self.close()
+        return False
+
 
 def _db():
-    """Return a sqlite3 connection with row_factory set."""
-    con = sqlite3.connect(DB_FILE)
-    con.row_factory = sqlite3.Row
-    return con
+    """Return a database connection wrapper (PostgreSQL or SQLite)."""
+    return _PGCon() if _USE_PG else _SQLiteCon()
+
 
 def _init_db():
+    _id_col = "SERIAL PRIMARY KEY" if _USE_PG else "INTEGER PRIMARY KEY AUTOINCREMENT"
     with _db() as con:
-        con.executescript("""
+        con.execute(f"""
             CREATE TABLE IF NOT EXISTS users (
-                username     TEXT PRIMARY KEY,
+                username      TEXT PRIMARY KEY,
                 password_hash TEXT NOT NULL
-            );
+            )
+        """)
+        con.execute(f"""
             CREATE TABLE IF NOT EXISTS learned_words (
-                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                id       {_id_col},
                 username TEXT NOT NULL,
                 english  TEXT NOT NULL,
                 chinese  TEXT NOT NULL,
                 pinyin   TEXT NOT NULL,
                 UNIQUE(username, english)
-            );
+            )
+        """)
+        con.execute(f"""
             CREATE TABLE IF NOT EXISTS settings (
                 username     TEXT PRIMARY KEY,
                 manual_level INTEGER
-            );
+            )
         """)
 
 _init_db()
@@ -128,16 +190,16 @@ def _register(username: str, password: str) -> str | None:
         return "Password must be at least 4 characters."
     try:
         with _db() as con:
-            con.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)",
+            con.execute("INSERT INTO users (username, password_hash) VALUES (%s, %s)",
                         (username, _hash(password)))
         return None
-    except sqlite3.IntegrityError:
+    except _IntegrityError:
         return "Username already taken."
 
 def _login(username: str, password: str) -> bool:
     username = username.strip().lower()
     with _db() as con:
-        row = con.execute("SELECT password_hash FROM users WHERE username = ?", (username,)).fetchone()
+        row = con.execute("SELECT password_hash FROM users WHERE username = %s", (username,)).fetchone()
     return row is not None and row["password_hash"] == _hash(password)
 
 # ─── Session-state defaults ────────────────────────────────────────────────────
@@ -269,12 +331,19 @@ def recognize_handwriting(image_data, expected: str) -> tuple[bool, str]:
     except Exception as e:
         return False, f"Recognition error: {e}"
 
-def make_audio(text: str):
+@st.cache_data(show_spinner=False)
+def make_audio(text: str) -> bytes | None:
+    """Generate MP3 audio for Chinese text via gTTS.
+    Returns raw bytes (cached) or None on failure.
+    Validates the result contains a real MP3 frame before returning."""
     try:
         buf = io.BytesIO()
         gTTS(text=text, lang="zh").write_to_fp(buf)
-        buf.seek(0)
-        return buf
+        data = buf.getvalue()
+        # Validate: MP3 frames start with 0xFF 0xFx, or an ID3 tag starts with "ID3"
+        if len(data) < 4 or not (data[:2] in (b"\xff\xf3", b"\xff\xf2", b"\xff\xfb", b"\xff\xfa") or data[:3] == b"ID3"):
+            return None
+        return data
     except Exception:
         return None
 
@@ -339,17 +408,23 @@ def progress(step: int, total: int = 6, label: str = ""):
     st.progress(step / total)
     st.caption(f"Step {step} of {total}: {label}")
 
-def transcribe_chinese(audio_bytes: bytes) -> str | None:
-    """Transcribe audio bytes to Chinese text via Google STT."""
+def transcribe_chinese(audio_bytes: bytes, mime_type: str = "") -> str | None:
+    """Transcribe audio bytes to Chinese text via Google STT.
+    st.audio_input() always returns WAV, so we pass the bytes straight to
+    SpeechRecognition without any ffmpeg/pydub conversion."""
     if not audio_bytes:
         return None
     try:
         import speech_recognition as sr
         recognizer = sr.Recognizer()
-        audio_io = io.BytesIO(audio_bytes)
-        with sr.AudioFile(audio_io) as source:
+        with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
             audio_data = recognizer.record(source)
         return recognizer.recognize_google(audio_data, language="zh-CN")
+    except sr.UnknownValueError:
+        return None
+    except sr.RequestError:
+        st.warning("Speech recognition service unavailable. Check your connection.")
+        return None
     except Exception:
         return None
 
@@ -386,7 +461,7 @@ def load_learned_words() -> list[dict]:
     username = st.session_state.get("username", "_guest")
     with _db() as con:
         rows = con.execute(
-            "SELECT english, chinese, pinyin FROM learned_words WHERE username = ? ORDER BY id",
+            "SELECT english, chinese, pinyin FROM learned_words WHERE username = %s ORDER BY id",
             (username,)
         ).fetchall()
     return [{"english": r["english"], "chinese": r["chinese"], "pinyin": r["pinyin"]} for r in rows]
@@ -395,22 +470,23 @@ def save_learned_word(english: str, chinese: str, pinyin: str):
     username = st.session_state.get("username", "_guest")
     with _db() as con:
         con.execute(
-            "INSERT OR IGNORE INTO learned_words (username, english, chinese, pinyin) VALUES (?, ?, ?, ?)",
+            "INSERT INTO learned_words (username, english, chinese, pinyin) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (username, english) DO NOTHING",
             (username, english, chinese, pinyin)
         )
 
 def load_settings() -> dict:
     username = st.session_state.get("username", "_guest")
     with _db() as con:
-        row = con.execute("SELECT manual_level FROM settings WHERE username = ?", (username,)).fetchone()
+        row = con.execute("SELECT manual_level FROM settings WHERE username = %s", (username,)).fetchone()
     return {"manual_level": row["manual_level"] if row else None}
 
 def save_settings(settings: dict):
     username = st.session_state.get("username", "_guest")
     with _db() as con:
         con.execute(
-            "INSERT INTO settings (username, manual_level) VALUES (?, ?) "
-            "ON CONFLICT(username) DO UPDATE SET manual_level = excluded.manual_level",
+            "INSERT INTO settings (username, manual_level) VALUES (%s, %s) "
+            "ON CONFLICT (username) DO UPDATE SET manual_level = excluded.manual_level",
             (username, settings.get("manual_level"))
         )
 
@@ -819,7 +895,7 @@ elif st.session_state.stage == "learn":
     st.markdown("### 🔊 Listen:")
     audio = make_audio(st.session_state.chinese_text)
     if audio:
-        st.audio(audio, format="audio/mp3")
+        st.audio(audio, format="audio/mpeg")
     st.markdown("---")
     if st.button("Next: Pronunciation Quiz →", type="primary", use_container_width=True):
         go("pron_quiz")
@@ -846,24 +922,14 @@ elif st.session_state.stage == "pron_quiz":
     with st.expander("🔊 Hear it again first"):
         audio = make_audio(st.session_state.chinese_text)
         if audio:
-            st.audio(audio, format="audio/mp3")
+            st.audio(audio, format="audio/mpeg")
 
     st.markdown("### Record your pronunciation:")
-    try:
-        from audio_recorder_streamlit import audio_recorder
-        audio_bytes = audio_recorder(
-            text="Click to record",
-            recording_color="#c0392b",
-            neutral_color="#2c3e50",
-            pause_threshold=2.0,
-            key="pron_recorder",
-        )
-    except ImportError:
-        st.error("audio-recorder-streamlit not installed.")
-        audio_bytes = None
+    audio_input = st.audio_input("Click to record", key="pron_recorder")
+    audio_bytes = audio_input.read() if audio_input else None
 
     if audio_bytes:
-        st.audio(audio_bytes, format="audio/wav")
+        st.audio(audio_bytes)
         with st.spinner("Checking your pronunciation…"):
             transcribed = transcribe_chinese(audio_bytes)
 
@@ -898,13 +964,6 @@ elif st.session_state.stage == "sentence":
     spoken = set(st.session_state.sentences_spoken)
     total  = len(st.session_state.example_sentences)
 
-    try:
-        from audio_recorder_streamlit import audio_recorder
-        recorder_available = True
-    except ImportError:
-        recorder_available = False
-        st.error("audio-recorder-streamlit not installed.")
-
     for i, s in enumerate(st.session_state.example_sentences):
         done = i in spoken
         with st.container(border=True):
@@ -916,19 +975,14 @@ elif st.session_state.stage == "sentence":
             with cb:
                 a = make_audio(s["chinese"])
                 if a:
-                    st.audio(a, format="audio/mp3")
+                    st.audio(a, format="audio/mpeg")
 
             if done:
                 st.success("✅ Pronunciation matched!")
-            elif recorder_available:
+            else:
                 st.markdown("**Say this aloud:**")
-                audio_bytes = audio_recorder(
-                    text="Click to record",
-                    recording_color="#c0392b",
-                    neutral_color="#2c3e50",
-                    pause_threshold=2.5,
-                    key=f"sent_rec_{i}",
-                )
+                audio_input = st.audio_input("Click to record", key=f"sent_rec_{i}")
+                audio_bytes = audio_input.read() if audio_input else None
                 if audio_bytes:
                     with st.spinner("Checking pronunciation…"):
                         transcribed = transcribe_chinese(audio_bytes)
@@ -970,21 +1024,11 @@ elif st.session_state.stage == "sent_quiz":
         st.markdown(f"  • {s['chinese']} — {s['english']}")
     st.markdown("**Now say a *new* sentence that uses this character!**")
 
-    try:
-        from audio_recorder_streamlit import audio_recorder
-        audio_bytes = audio_recorder(
-            text="Click to record your sentence",
-            recording_color="#c0392b",
-            neutral_color="#2c3e50",
-            pause_threshold=2.5,
-            key="sent_recorder",
-        )
-    except ImportError:
-        st.error("audio-recorder-streamlit not installed.")
-        audio_bytes = None
+    audio_input = st.audio_input("Click to record your sentence", key="sent_recorder")
+    audio_bytes = audio_input.read() if audio_input else None
 
     if audio_bytes:
-        st.audio(audio_bytes, format="audio/wav")
+        st.audio(audio_bytes)
         with st.spinner("Checking…"):
             transcribed = transcribe_chinese(audio_bytes)
 
