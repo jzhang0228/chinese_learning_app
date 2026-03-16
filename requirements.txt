@@ -3,7 +3,9 @@ deep-translator
 pypinyin
 gTTS
 streamlit-drawable-canvas
-audio-recorder-streamlit
 SpeechRecognition
 streamlit-autorefresh
 extra-streamlit-components
+python-dotenv
+anthropic
+psycopg2-binary
