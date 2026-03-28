@@ -21,7 +21,7 @@ export default function ReviewResults({ won, lost }: ReviewResultsProps) {
   const handleRelearn = (word: ReviewWord) => {
     store.setWord(word.english, word.chinese, word.pinyin);
     store.setStage("learn");
-    router.push("/learn");
+    window.open("/learn", "_blank");
   };
 
   return (

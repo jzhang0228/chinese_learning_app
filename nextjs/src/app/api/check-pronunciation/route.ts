@@ -39,22 +39,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'expected and transcript are required' }, { status: 400 });
     }
 
+    const transcriptPinyinRaw = getPinyin(transcript);
+
     // 1. Exact character match — always pass
     if (transcript.includes(expected)) {
-      return NextResponse.json({ passed: true, method: 'exact' });
+      return NextResponse.json({ passed: true, method: 'exact', transcriptPinyin: transcriptPinyinRaw });
     }
 
     // 2. Compare pinyin (tone-insensitive)
     const expectedPy = stripTones(expectedPinyin || getPinyin(expected));
-    const transcriptPy = stripTones(getPinyin(transcript));
+    const transcriptPy = stripTones(transcriptPinyinRaw);
 
     if (!expectedPy || !transcriptPy) {
-      return NextResponse.json({ passed: false, method: 'pinyin_failed' });
+      return NextResponse.json({ passed: false, method: 'pinyin_failed', transcriptPinyin: transcriptPinyinRaw });
     }
 
     // Check if the transcript pinyin contains the expected pinyin
     if (transcriptPy.includes(expectedPy) || expectedPy.includes(transcriptPy)) {
-      return NextResponse.json({ passed: true, method: 'pinyin' });
+      return NextResponse.json({ passed: true, method: 'pinyin', transcriptPinyin: transcriptPinyinRaw });
     }
 
     // Check individual syllables — pass if the expected syllable appears anywhere
@@ -62,10 +64,10 @@ export async function POST(request: Request) {
     const transcriptSyllables = transcriptPy.split(' ').filter(Boolean);
     const matchCount = expectedSyllables.filter(s => transcriptSyllables.includes(s)).length;
     if (expectedSyllables.length > 0 && matchCount / expectedSyllables.length >= 0.5) {
-      return NextResponse.json({ passed: true, method: 'syllable' });
+      return NextResponse.json({ passed: true, method: 'syllable', transcriptPinyin: transcriptPinyinRaw });
     }
 
-    return NextResponse.json({ passed: false, method: 'no_match' });
+    return NextResponse.json({ passed: false, method: 'no_match', transcriptPinyin: transcriptPinyinRaw });
   } catch (e) {
     console.error('Check pronunciation error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

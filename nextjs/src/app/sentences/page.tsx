@@ -2,7 +2,7 @@
 
 import { useStore } from "@/lib/store";
 import { useRouter } from "next/navigation";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import AudioPlayer from "@/components/AudioPlayer";
 import SpeechRecorder from "@/components/SpeechRecorder";
 import ProgressBar from "@/components/ProgressBar";
@@ -25,8 +25,11 @@ export default function SentencesPage() {
   const [loading, setLoading] = useState(true);
   const [feedbacks, setFeedbacks] = useState<Record<number, string>>({});
 
+  const fetchedRef = useRef(false);
   useEffect(() => {
+    if (fetchedRef.current) return;
     if (store.chineseText && store.exampleSentences.length === 0) {
+      fetchedRef.current = true;
       fetchSentences();
     } else {
       setLoading(false);

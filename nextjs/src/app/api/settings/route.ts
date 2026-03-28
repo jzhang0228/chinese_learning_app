@@ -10,12 +10,15 @@ export async function GET() {
     }
 
     const db = await getDb();
-    const row = await db.get<{ manual_level: number | null }>(
-      'SELECT manual_level FROM settings WHERE username = ?',
+    const row = await db.get<{ manual_level: number | null; current_level: number }>(
+      'SELECT manual_level, current_level FROM settings WHERE username = ?',
       [username]
     );
 
-    return NextResponse.json({ manual_level: row?.manual_level ?? null });
+    return NextResponse.json({
+      manual_level: row?.manual_level ?? null,
+      current_level: row?.current_level ?? 1,
+    });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

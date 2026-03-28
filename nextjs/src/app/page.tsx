@@ -2,7 +2,7 @@
 
 import { useStore } from "@/lib/store";
 import { useRouter } from "next/navigation";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 export default function InputPage() {
   const store = useStore();
@@ -19,9 +19,13 @@ export default function InputPage() {
   const [recommendation, setRecommendation] = useState<any>(null);
   const [learnedWords, setLearnedWords] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [userLevel, setUserLevel] = useState(1);
+  const [userLevel, setUserLevel] = useState<number | null>(null);
+  const [dbLevel, setDbLevel] = useState<number | null>(null);
+  const dbLevelLoadedRef = useRef(false);
   const [loading, setLoading] = useState(false);
   const [sessionChecked, setSessionChecked] = useState(false);
+  const [reviewWords, setReviewWords] = useState<any[]>([]);
+  const [showReviewWords, setShowReviewWords] = useState(false);
 
   useEffect(() => {
     const checkSession = async () => {
@@ -31,16 +35,16 @@ export default function InputPage() {
           const data = await res.json();
           if (data.username) {
             store.setUsername(data.username);
+          } else {
+            store.setUsername(null);
           }
+        } else {
+          store.setUsername(null);
         }
       } catch {}
       setSessionChecked(true);
     };
-    if (!store.username) {
-      checkSession();
-    } else {
-      setSessionChecked(true);
-    }
+    checkSession();
   }, []);
 
   const fetchUserData = useCallback(async () => {
@@ -60,8 +64,32 @@ export default function InputPage() {
         const data = await res.json();
         if (data.character) {
           setRecommendation(data);
-          setUserLevel(data.current_level || 1);
         }
+      }
+    } catch {}
+  }, []);
+
+  const fetchCurrentLevel = useCallback(async () => {
+    try {
+      const res = await fetch("/api/settings");
+      if (res.ok) {
+        const data = await res.json();
+        const lvl = data.current_level || 1;
+        setUserLevel(lvl);
+        if (!dbLevelLoadedRef.current) {
+          dbLevelLoadedRef.current = true;
+          setDbLevel(lvl);
+        }
+      }
+    } catch {}
+  }, []);
+
+  const fetchReviewWords = useCallback(async () => {
+    try {
+      const res = await fetch("/api/review-words");
+      if (res.ok) {
+        const data = await res.json();
+        setReviewWords(data.words || []);
       }
     } catch {}
   }, []);
@@ -70,8 +98,10 @@ export default function InputPage() {
     if (store.username) {
       fetchUserData();
       fetchRecommendation();
+      fetchReviewWords();
+      fetchCurrentLevel();
     }
-  }, [store.username, level, fetchUserData, fetchRecommendation]);
+  }, [store.username, level, fetchUserData, fetchRecommendation, fetchReviewWords, fetchCurrentLevel]);
 
   useEffect(() => {
     if (store.username && level !== "auto") {
@@ -148,6 +178,19 @@ export default function InputPage() {
       store.setStage("learn");
       router.push("/learn");
     }
+  };
+
+  const markAsLearned = async (chinese: string, english: string, pinyin: string) => {
+    try {
+      await fetch("/api/words", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chinese, english, pinyin }),
+      });
+      fetchUserData();
+      fetchRecommendation();
+      fetchCurrentLevel();
+    } catch {}
   };
 
   if (!sessionChecked) {
@@ -252,7 +295,7 @@ export default function InputPage() {
 
       <div className="text-center mb-6">
         <span className="text-sm" style={{ color: "var(--muted)" }}>
-          Level {userLevel} ({level === "auto" ? "auto" : "manual"}) · {learnedWords.length} words learned
+          Level {userLevel ?? "..."} ({level === "auto" ? "auto" : "manual"}) · {learnedWords.length} words learned
         </span>
       </div>
 
@@ -268,9 +311,9 @@ export default function InputPage() {
           style={{ borderColor: "var(--card-border)" }}
         >
           <option value="auto">Auto</option>
-          {Array.from({ length: 10 }, (_, i) => (
-            <option key={i + 1} value={String(i + 1)}>
-              Level {i + 1}
+          {dbLevel != null && Array.from({ length: Math.min(11, 251 - dbLevel) }, (_, i) => (
+            <option key={dbLevel + i} value={String(dbLevel + i)}>
+              Level {dbLevel + i}
             </option>
           ))}
         </select>
@@ -291,15 +334,23 @@ export default function InputPage() {
           <div className="text-center text-sm mb-4" style={{ color: "var(--muted)" }}>
             {recommendation.english} · Level {recommendation.level} · Rank #{recommendation.rank}
           </div>
-          <button
-            onClick={startLearnFromRecommendation}
-            disabled={loading}
-            className="btn-accent w-full py-2.5 text-sm"
-          >
-            {loading
-              ? "Loading..."
-              : `Learn ${recommendation.character} (${recommendation.english})`}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={startLearnFromRecommendation}
+              disabled={loading}
+              className="btn-accent flex-1 py-2.5 text-sm"
+            >
+              {loading
+                ? "Loading..."
+                : `Learn ${recommendation.character}`}
+            </button>
+            <button
+              onClick={() => markAsLearned(recommendation.character, recommendation.english, recommendation.pinyin)}
+              className="btn-ghost text-sm py-2.5"
+            >
+              Already Know
+            </button>
+          </div>
         </div>
       )}
 
@@ -354,6 +405,59 @@ export default function InputPage() {
               Sky Drop
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Words needing review */}
+      {reviewWords.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-sm p-5 mb-4" style={{ border: "1px solid var(--card-border)" }}>
+          <button
+            onClick={() => setShowReviewWords(!showReviewWords)}
+            className="text-sm font-semibold w-full text-left flex items-center justify-between"
+            style={{ color: "#f59e0b" }}
+          >
+            Words to review ({reviewWords.length})
+            <span className="text-xs" style={{ color: "var(--muted)" }}>{showReviewWords ? "▼" : "▶"}</span>
+          </button>
+          {showReviewWords && (
+            <div className="mt-3 flex flex-col gap-1.5">
+              {reviewWords.map((w: any, i: number) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-amber-50"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl min-w-[48px] font-light" style={{ color: "var(--char-color)" }}>
+                      {w.chinese}
+                    </span>
+                    <div className="flex flex-col">
+                      <span className="text-sm font-medium" style={{ color: "var(--foreground)" }}>
+                        {w.pinyin}
+                      </span>
+                      <span className="text-xs" style={{ color: "var(--muted)" }}>
+                        {w.english}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100" style={{ color: "#92400e" }}>
+                      {w.consecutive_correct}/5
+                    </span>
+                    <button
+                      onClick={() => {
+                        store.setWord(w.english, w.chinese, w.pinyin);
+                        store.setStage("learn");
+                        router.push("/learn");
+                      }}
+                      className="btn-primary text-xs py-1 px-3"
+                    >
+                      Re-learn
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

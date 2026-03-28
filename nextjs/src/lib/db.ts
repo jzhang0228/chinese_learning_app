@@ -38,12 +38,22 @@ const PG_SCHEMA = `
   );
   CREATE TABLE IF NOT EXISTS settings (
     username TEXT PRIMARY KEY,
-    manual_level INTEGER
+    manual_level INTEGER,
+    current_level INTEGER NOT NULL DEFAULT 1
   );
   CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
     username TEXT NOT NULL,
     created_at DOUBLE PRECISION NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS review_words (
+    id SERIAL PRIMARY KEY,
+    username TEXT NOT NULL,
+    chinese TEXT NOT NULL,
+    pinyin TEXT NOT NULL,
+    english TEXT NOT NULL,
+    consecutive_correct INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(username, chinese)
   );
 `;
 
@@ -62,12 +72,22 @@ const SQLITE_SCHEMA = `
   );
   CREATE TABLE IF NOT EXISTS settings (
     username TEXT PRIMARY KEY,
-    manual_level INTEGER
+    manual_level INTEGER,
+    current_level INTEGER NOT NULL DEFAULT 1
   );
   CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
     username TEXT NOT NULL,
     created_at REAL NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS review_words (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    chinese TEXT NOT NULL,
+    pinyin TEXT NOT NULL,
+    english TEXT NOT NULL,
+    consecutive_correct INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(username, chinese)
   );
 `;
 

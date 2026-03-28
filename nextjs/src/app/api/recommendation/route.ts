@@ -12,6 +12,7 @@ interface CharacterRow {
   level: number;
 }
 
+// CSV format: rank,character,pinyin,english,frequency_rank,stroke_count
 function loadCharacters(): CharacterRow[] {
   const csvPath = path.join(process.cwd(), 'characters.csv');
   const content = fs.readFileSync(csvPath, 'utf-8');
@@ -19,14 +20,16 @@ function loadCharacters(): CharacterRow[] {
   const characters: CharacterRow[] = [];
   for (let i = 1; i < lines.length; i++) {
     const parts = lines[i].split(',');
-    if (parts.length >= 5) {
+    if (parts.length >= 6) {
       const rank = parseInt(parts[0], 10);
+      // english field may contain commas, so take everything between pinyin and the last two numeric fields
+      const english = parts.slice(3, parts.length - 2).join(',');
       characters.push({
         rank,
         character: parts[1],
         pinyin: parts[2],
-        english: parts.slice(3, parts.length - 1).join(','),
-        level: Math.min(10, Math.ceil(rank / 500)),
+        english,
+        level: Math.min(250, Math.ceil(rank / 20)),
       });
     }
   }
@@ -46,21 +49,14 @@ function determineLevel(
 
   const learnedChars = new Set(learnedWords.map((w) => w.chinese));
 
-  let maxLearnedLevel = 1;
-  for (const char of characters) {
-    if (learnedChars.has(char.character) && char.level > maxLearnedLevel) {
-      maxLearnedLevel = char.level;
-    }
+  // Start from level 1, only advance when all 20 words at the level are learned
+  for (let lvl = 1; lvl <= 250; lvl++) {
+    const charsAtLevel = characters.filter((c) => c.level === lvl);
+    const allLearned = charsAtLevel.every((c) => learnedChars.has(c.character));
+    if (!allLearned) return lvl;
   }
 
-  const charsAtLevel = characters.filter((c) => c.level === maxLearnedLevel);
-  const learnedAtLevel = charsAtLevel.filter((c) => learnedChars.has(c.character));
-
-  if (charsAtLevel.length > 0 && learnedAtLevel.length / charsAtLevel.length >= 0.7 && maxLearnedLevel < 10) {
-    return maxLearnedLevel + 1;
-  }
-
-  return maxLearnedLevel;
+  return 250;
 }
 
 export async function GET() {
@@ -87,6 +83,12 @@ export async function GET() {
     const characters = loadCharacters();
     const currentLevel = determineLevel(learnedWords, manualLevel, characters);
 
+    // Save current level to DB
+    await db.run(
+      'INSERT INTO settings (username, current_level) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET current_level = ?',
+      [username, currentLevel, currentLevel]
+    );
+
     const unlearnedAtLevel = characters.filter((c) => c.level === currentLevel && !learnedChars.has(c.character));
 
     if (unlearnedAtLevel.length > 0) {
@@ -101,7 +103,7 @@ export async function GET() {
       });
     }
 
-    for (let lvl = currentLevel + 1; lvl <= 10; lvl++) {
+    for (let lvl = currentLevel + 1; lvl <= 250; lvl++) {
       const unlearnedHigher = characters.filter((c) => c.level === lvl && !learnedChars.has(c.character));
       if (unlearnedHigher.length > 0) {
         const pick = unlearnedHigher[Math.floor(Math.random() * unlearnedHigher.length)];

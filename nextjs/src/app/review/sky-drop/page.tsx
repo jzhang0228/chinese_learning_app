@@ -55,27 +55,59 @@ export default function SkyDropPage() {
   const missedWordsRef = useRef<Set<string>>(new Set());
   const [results, setResults] = useState<{ won: Word[]; lost: Word[] } | null>(null);
 
-  // Fetch words
+  // Fetch words: 20% review, 10% unlearned, 70% learned
   useEffect(() => {
     const fetchWords = async () => {
       try {
-        const res = await fetch("/api/words");
-        if (!res.ok) throw new Error("Failed to fetch words");
-        const data = await res.json();
-        const raw: Word[] = (data.words || data);
+        const [learnedRes, reviewRes] = await Promise.all([
+          fetch("/api/words"),
+          fetch("/api/review-words"),
+        ]);
+
+        const learnedData = learnedRes.ok ? await learnedRes.json() : { words: [] };
+        const learnedRaw: Word[] = (learnedData.words || []).map((w: any) => ({
+          chinese: w.chinese, english: w.english, pinyin: w.pinyin || "",
+        }));
+
+        const reviewData = reviewRes.ok ? await reviewRes.json() : { words: [] };
+        const reviewRaw: Word[] = (reviewData.words || []).map((w: any) => ({
+          chinese: w.chinese, english: w.english, pinyin: w.pinyin || "",
+        }));
+
+        const TARGET = 30;
         const seen = new Set<string>();
-        const w: Word[] = raw.filter((word) => {
-          if (seen.has(word.chinese)) return false;
-          seen.add(word.chinese);
-          return true;
-        }).slice(0, 30);
-        if (w.length === 0) {
+        const selected: Word[] = [];
+
+        const addWord = (word: Word) => {
+          if (!seen.has(word.chinese)) {
+            seen.add(word.chinese);
+            selected.push(word);
+          }
+        };
+
+        // 1. Up to 20% from review words
+        const maxReview = Math.floor(TARGET * 0.4);
+        const shuffledReview = [...reviewRaw].sort(() => Math.random() - 0.5);
+        for (const w of shuffledReview) {
+          if (selected.length >= maxReview) break;
+          addWord(w);
+        }
+
+        // 2. Fill the rest from learned words
+        const shuffledLearned = [...learnedRaw].sort(() => Math.random() - 0.5);
+        for (const w of shuffledLearned) {
+          if (selected.length >= TARGET) break;
+          addWord(w);
+        }
+
+        if (selected.length === 0) {
           setError("No learned words found. Learn some words first!");
           setLoading(false);
           return;
         }
-        setWords(w);
-        wordsRef.current = w;
+
+        setWords(selected);
+        wordsRef.current = selected;
         setLoading(false);
       } catch {
         setError("Could not load words.");
@@ -127,6 +159,13 @@ export default function SkyDropPage() {
       }
     }
     setResults({ won, lost });
+
+    // Save results to review_words table
+    fetch("/api/review-words", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ won, lost }),
+    }).catch(() => {});
   }, []);
 
   const startGame = useCallback(() => {
@@ -203,12 +242,28 @@ export default function SkyDropPage() {
     const containerHeight = containerRef.current?.clientHeight || 600;
     const groundY = containerHeight - 60;
 
+    const allShownOnceRef = { done: false };
+
     const spawnTile = () => {
       if (totalSpawnedRef.current >= totalToSpawnRef.current) return;
-      const available = wordsRef.current.filter(
-        (w) => (spawnCountRef.current[w.chinese] || 0) < 2
-      );
-      if (available.length === 0) return;
+
+      // First pass: only spawn words that haven't been shown yet
+      // Second pass: only after all words shown once
+      let available;
+      if (!allShownOnceRef.done) {
+        available = wordsRef.current.filter(
+          (w) => (spawnCountRef.current[w.chinese] || 0) === 0
+        );
+        if (available.length === 0) {
+          allShownOnceRef.done = true;
+        }
+      }
+      if (allShownOnceRef.done) {
+        available = wordsRef.current.filter(
+          (w) => (spawnCountRef.current[w.chinese] || 0) < 2
+        );
+      }
+      if (!available || available.length === 0) return;
       const word = available[Math.floor(Math.random() * available.length)];
       spawnCountRef.current[word.chinese] = (spawnCountRef.current[word.chinese] || 0) + 1;
       totalSpawnedRef.current++;
