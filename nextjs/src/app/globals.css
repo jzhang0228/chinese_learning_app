@@ -1,0 +1,128 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --background: #f8fafb;
+    --foreground: #1e293b;
+    --primary: #3b82f6;
+    --primary-hover: #2563eb;
+    --primary-light: #dbeafe;
+    --accent: #10b981;
+    --accent-hover: #059669;
+    --accent-light: #d1fae5;
+    --muted: #94a3b8;
+    --card-bg: #ffffff;
+    --card-border: #e2e8f0;
+    --char-color: #1e40af;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+}
+
+@layer components {
+  .big-char {
+    font-size: 96px;
+    text-align: center;
+    color: var(--char-color);
+    font-weight: 300;
+    line-height: 1.1;
+  }
+
+  .pinyin {
+    font-size: 24px;
+    text-align: center;
+    color: var(--foreground);
+    letter-spacing: 3px;
+    font-weight: 500;
+  }
+
+  .eng-label {
+    font-size: 16px;
+    text-align: center;
+    color: var(--muted);
+  }
+
+  .quiz-box {
+    background: var(--card-bg);
+    border-left: 4px solid var(--primary);
+    padding: 16px 20px;
+    border-radius: 12px;
+    margin: 8px 0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #93bbfd, #7cacf8);
+    color: #1e3a5f;
+    font-weight: 600;
+    padding: 10px 24px;
+    border-radius: 12px;
+    transition: all 0.2s;
+    box-shadow: 0 2px 8px rgba(147, 187, 253, 0.35);
+    cursor: pointer;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn-primary:hover {
+    background: linear-gradient(135deg, #7cacf8, #6b9ef5);
+    box-shadow: 0 4px 14px rgba(147, 187, 253, 0.5);
+    transform: translateY(-1px);
+  }
+  .btn-primary:disabled {
+    opacity: 0.5;
+    transform: none;
+    box-shadow: none;
+    cursor: default;
+  }
+
+  .btn-accent {
+    background: linear-gradient(135deg, #6ee7b7, #5dd8a8);
+    color: #134e3a;
+    font-weight: 600;
+    padding: 10px 24px;
+    border-radius: 12px;
+    transition: all 0.2s;
+    box-shadow: 0 2px 8px rgba(110, 231, 183, 0.35);
+    cursor: pointer;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn-accent:hover {
+    background: linear-gradient(135deg, #5dd8a8, #4ade98);
+    box-shadow: 0 4px 14px rgba(110, 231, 183, 0.5);
+    transform: translateY(-1px);
+  }
+  .btn-accent:disabled {
+    opacity: 0.5;
+    transform: none;
+    box-shadow: none;
+    cursor: default;
+  }
+
+  .btn-ghost {
+    background: #ffffff;
+    color: #64748b;
+    font-weight: 600;
+    padding: 10px 24px;
+    border-radius: 12px;
+    border: 1.5px solid var(--card-border);
+    transition: all 0.2s;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn-ghost:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: var(--primary-light);
+  }
+}
