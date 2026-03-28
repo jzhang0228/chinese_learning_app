@@ -20,12 +20,13 @@ function loadCharacters(): CharacterRow[] {
   for (let i = 1; i < lines.length; i++) {
     const parts = lines[i].split(',');
     if (parts.length >= 5) {
+      const rank = parseInt(parts[0], 10);
       characters.push({
-        rank: parseInt(parts[0], 10),
+        rank,
         character: parts[1],
         pinyin: parts[2],
         english: parts.slice(3, parts.length - 1).join(','),
-        level: parseInt(parts[parts.length - 1], 10),
+        level: Math.min(10, Math.ceil(rank / 500)),
       });
     }
   }

@@ -42,7 +42,7 @@ export async function POST(request: Request) {
             {
               type: 'text',
               text: `A beginner is learning to write the Chinese character(s): ${expectedText}
-Look at their handwritten attempt and be VERY lenient — this is a beginner using a mouse or finger. PASS if the overall shape is even loosely recognisable or shows a genuine attempt at the right strokes. Only FAIL if it looks completely unrelated to the character (e.g. a random scribble with no resemblance). Proportion, stroke order, and neatness do NOT matter.
+Look at their handwritten attempt. This is a beginner using a mouse or finger, so be forgiving of messy strokes, bad proportions, and wobbly lines. PASS if you can tell they were attempting to write "${expectedText}" — even if some strokes are missing or imperfect, as long as the general shape is there. Only FAIL if they wrote a clearly different character, or the attempt has no recognisable resemblance to "${expectedText}". Stroke order does not matter.
 Reply with exactly one line:
 PASS: <brief encouraging feedback>
 or

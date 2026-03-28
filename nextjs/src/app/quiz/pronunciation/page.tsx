@@ -7,36 +7,44 @@ import AudioPlayer from "@/components/AudioPlayer";
 import SpeechRecorder from "@/components/SpeechRecorder";
 import ProgressBar from "@/components/ProgressBar";
 
-function countCJKMatch(a: string, b: string): number {
-  const cjkRegex = /[\u4e00-\u9fff]/g;
-  const charsA: string[] = a.match(cjkRegex) || [];
-  const charsB: string[] = b.match(cjkRegex) || [];
-  if (charsB.length === 0) return 0;
-  let matches = 0;
-  for (const ch of charsB) {
-    if (charsA.includes(ch)) matches++;
-  }
-  return matches / charsB.length;
-}
-
 export default function PronunciationQuizPage() {
   const store = useStore();
   const router = useRouter();
   const [result, setResult] = useState<string>("");
   const [passed, setPassed] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [checking, setChecking] = useState(false);
 
   const handleResult = useCallback(
-    (transcript: string) => {
+    async (transcript: string) => {
       setResult(transcript);
-      const score = countCJKMatch(transcript, store.chineseText);
-      if (score >= 0.6) {
-        setPassed(true);
-        setFeedback("Great pronunciation! You matched the character.");
-        store.setPronQuizPassed(true);
-      } else {
+      setChecking(true);
+      try {
+        const res = await fetch("/api/check-pronunciation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            expected: store.chineseText,
+            transcript,
+            expectedPinyin: store.pinyinText,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.passed) {
+            setPassed(true);
+            setFeedback("Great pronunciation!");
+            store.setPronQuizPassed(true);
+          } else {
+            setFeedback(`Not quite. You said "${transcript}". Try again!`);
+          }
+        } else {
+          setFeedback(`Not quite. You said "${transcript}". Try again!`);
+        }
+      } catch {
         setFeedback(`Not quite. You said "${transcript}". Try again!`);
       }
+      setChecking(false);
     },
     [store]
   );
@@ -79,7 +87,13 @@ export default function PronunciationQuizPage() {
         <SpeechRecorder onResult={handleResult} />
       </div>
 
-      {feedback && (
+      {checking && (
+        <div className="mt-4 px-5 py-3 rounded-xl text-sm font-medium bg-blue-50 text-blue-700">
+          Checking pronunciation...
+        </div>
+      )}
+
+      {!checking && feedback && (
         <div
           className={`mt-4 px-5 py-3 rounded-xl text-sm font-medium ${
             passed ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"

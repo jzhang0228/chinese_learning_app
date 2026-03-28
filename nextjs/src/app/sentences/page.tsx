@@ -115,13 +115,13 @@ export default function SentencesPage() {
                 borderLeftColor: spoken ? "var(--accent)" : "var(--primary)",
               }}
             >
-              <div className="text-lg font-semibold mb-1" style={{ color: "var(--foreground)" }}>
+              <div className="text-2xl font-semibold mb-1" style={{ color: "var(--foreground)" }}>
                 {sentence.chinese}
               </div>
               <div className="text-sm mb-1" style={{ color: "var(--foreground)", letterSpacing: "2px" }}>
                 {sentence.pinyin}
               </div>
-              <div className="text-sm mb-3" style={{ color: "var(--muted)" }}>
+              <div className="text-base mb-3" style={{ color: "var(--muted)" }}>
                 {sentence.english}
               </div>
 
