@@ -26,6 +26,8 @@ export default function InputPage() {
   const [sessionChecked, setSessionChecked] = useState(false);
   const [reviewWords, setReviewWords] = useState<any[]>([]);
   const [showReviewWords, setShowReviewWords] = useState(false);
+  const prevLevelRef = useRef<number | null>(null);
+  const [levelUp, setLevelUp] = useState<{ from: number; to: number } | null>(null);
 
   useEffect(() => {
     const checkSession = async () => {
@@ -75,6 +77,10 @@ export default function InputPage() {
       if (res.ok) {
         const data = await res.json();
         const lvl = data.current_level || 1;
+        if (prevLevelRef.current !== null && lvl > prevLevelRef.current) {
+          setLevelUp({ from: prevLevelRef.current, to: lvl });
+        }
+        prevLevelRef.current = lvl;
         setUserLevel(lvl);
         if (!dbLevelLoadedRef.current) {
           dbLevelLoadedRef.current = true;
@@ -461,6 +467,9 @@ export default function InputPage() {
         </div>
       )}
 
+      {/* Level up celebration */}
+      {levelUp && <LevelUpCelebration from={levelUp.from} to={levelUp.to} onClose={() => setLevelUp(null)} />}
+
       {/* Learned words history */}
       {learnedWords.length > 0 && (
         <div className="bg-white rounded-2xl shadow-sm p-5" style={{ border: "1px solid var(--card-border)" }}>
@@ -496,6 +505,121 @@ export default function InputPage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ── Level-Up Celebration Overlay ── */
+
+const PARTICLE_CHARS = ["!", "!", "!", "!", "!", "!", "!", "!"];
+const CONFETTI_COLORS = ["#ef4444", "#f59e0b", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899", "#06b6d4", "#f97316"];
+
+function LevelUpCelebration({ from, to, onClose }: { from: number; to: number; onClose: () => void }) {
+  const [particles, setParticles] = useState<
+    { id: number; x: number; y: number; char: string; color: string; size: number; delay: number; dx: number }[]
+  >([]);
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const p = Array.from({ length: 50 }, (_, i) => ({
+      id: i,
+      x: Math.random() * 100,
+      y: Math.random() * 100,
+      char: PARTICLE_CHARS[Math.floor(Math.random() * PARTICLE_CHARS.length)],
+      color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+      size: 8 + Math.random() * 16,
+      delay: Math.random() * 0.5,
+      dx: -30 + Math.random() * 60,
+    }));
+    setParticles(p);
+  }, []);
+
+  const handleClose = () => {
+    setVisible(false);
+    setTimeout(onClose, 300);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ opacity: visible ? 1 : 0, transition: "opacity 0.3s" }}
+      onClick={handleClose}
+    >
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+
+      {/* Confetti particles */}
+      {particles.map((p) => (
+        <div
+          key={p.id}
+          className="absolute pointer-events-none"
+          style={{
+            left: `${p.x}%`,
+            top: `${p.y}%`,
+            fontSize: p.size,
+            color: p.color,
+            animation: `levelup-fall 2s ${p.delay}s ease-out forwards`,
+            transform: `translateX(${p.dx}px)`,
+            opacity: 0,
+          }}
+        >
+          {p.char}
+        </div>
+      ))}
+
+      {/* Center card */}
+      <div
+        className="relative bg-white rounded-3xl shadow-2xl p-8 flex flex-col items-center gap-4 max-w-sm mx-4"
+        style={{ animation: "levelup-bounce 0.6s ease-out" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-6xl" style={{ animation: "levelup-spin 1s ease-out" }}>
+          &#127881;
+        </div>
+        <div className="text-2xl font-bold" style={{ color: "var(--foreground)" }}>
+          Level Up!
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-3xl font-light" style={{ color: "var(--muted)" }}>{from}</span>
+          <span className="text-2xl" style={{ color: "var(--primary)" }}>&#x2192;</span>
+          <span
+            className="text-5xl font-bold"
+            style={{ color: "var(--primary)", animation: "levelup-glow 1.5s ease-in-out infinite" }}
+          >
+            {to}
+          </span>
+        </div>
+        <p className="text-sm text-center" style={{ color: "var(--muted)" }}>
+          Great job! You&apos;ve mastered all words at Level {from}!
+        </p>
+        <button
+          onClick={handleClose}
+          className="btn-accent py-2.5 px-8 text-sm mt-2"
+        >
+          Keep Going!
+        </button>
+      </div>
+
+      <style jsx>{`
+        @keyframes levelup-fall {
+          0% { opacity: 1; transform: translateY(-20px) rotate(0deg); }
+          100% { opacity: 0; transform: translateY(60vh) rotate(720deg); }
+        }
+        @keyframes levelup-bounce {
+          0% { transform: scale(0.3) translateY(40px); opacity: 0; }
+          50% { transform: scale(1.08); opacity: 1; }
+          70% { transform: scale(0.95); }
+          100% { transform: scale(1); }
+        }
+        @keyframes levelup-spin {
+          0% { transform: rotate(-20deg) scale(0.5); }
+          50% { transform: rotate(10deg) scale(1.2); }
+          100% { transform: rotate(0deg) scale(1); }
+        }
+        @keyframes levelup-glow {
+          0%, 100% { text-shadow: 0 0 8px rgba(59,130,246,0.3); }
+          50% { text-shadow: 0 0 20px rgba(59,130,246,0.6), 0 0 40px rgba(59,130,246,0.3); }
+        }
+      `}</style>
     </div>
   );
 }
