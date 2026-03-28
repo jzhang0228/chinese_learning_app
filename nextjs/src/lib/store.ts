@@ -48,7 +48,7 @@ const initialState: StoreState = {
   sentQuizPassed: false,
   writingQuizPassed: false,
   sentencesSpoken: [],
-  favoriteGames: ["memory", "sliding", "sudoku"],
+  favoriteGames: ["sliding", "lightsout", "minesweeper"],
   rewardGame: null,
 };
 
@@ -64,16 +64,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Migrate old game keys to new ones
+        // Migrate old game keys and remove retired games
         if (parsed.favoriteGames) {
           const keyMap: Record<string, string> = {
             puzzle: "sliding",
             lights: "lightsout",
             mines: "minesweeper",
           };
-          parsed.favoriteGames = parsed.favoriteGames.map(
-            (g: string) => keyMap[g] || g
-          );
+          const retired = new Set(["sudoku", "memory"]);
+          parsed.favoriteGames = parsed.favoriteGames
+            .map((g: string) => keyMap[g] || g)
+            .filter((g: string) => !retired.has(g));
         }
         setState((prev) => ({ ...prev, ...parsed }));
       } catch {}

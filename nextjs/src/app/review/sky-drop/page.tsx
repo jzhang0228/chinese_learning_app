@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import ReviewResults from "@/components/ReviewResults";
 
 interface Word {
   chinese: string;
   english: string;
+  pinyin: string;
 }
 
 interface FallingTile {
@@ -49,6 +51,9 @@ export default function SkyDropPage() {
   const recognitionRef = useRef<ReturnType<typeof createRecognition> | null>(null);
   const wordsRef = useRef<Word[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
+  const destroyedWordsRef = useRef<Set<string>>(new Set());
+  const missedWordsRef = useRef<Set<string>>(new Set());
+  const [results, setResults] = useState<{ won: Word[]; lost: Word[] } | null>(null);
 
   // Fetch words
   useEffect(() => {
@@ -94,6 +99,8 @@ export default function SkyDropPage() {
   }
 
   const destroyTile = useCallback((tileId: number) => {
+    const tile = tilesRef.current.find((t) => t.id === tileId);
+    if (tile) destroyedWordsRef.current.add(tile.word);
     tilesRef.current = tilesRef.current.map((t) =>
       t.id === tileId ? { ...t, exploding: true, explodeFrame: 0 } : t
     );
@@ -106,6 +113,20 @@ export default function SkyDropPage() {
       speedRef.current = Math.min(speedRef.current + 0.3, 4);
       setSpeed(speedRef.current);
     }
+  }, []);
+
+  const buildResults = useCallback(() => {
+    const wordMap = new Map(wordsRef.current.map((w) => [w.chinese, w]));
+    const won: Word[] = [];
+    const lost: Word[] = [];
+    for (const [chinese, word] of wordMap) {
+      if (missedWordsRef.current.has(chinese)) {
+        lost.push(word);
+      } else if (destroyedWordsRef.current.has(chinese)) {
+        won.push(word);
+      }
+    }
+    setResults({ won, lost });
   }, []);
 
   const startGame = useCallback(() => {
@@ -126,6 +147,9 @@ export default function SkyDropPage() {
     destroyedCountRef.current = 0;
     totalSpawnedRef.current = 0;
     lastSpawnRef.current = 0;
+    destroyedWordsRef.current = new Set();
+    missedWordsRef.current = new Set();
+    setResults(null);
     spawnCountRef.current = {};
     wordsRef.current.forEach((w) => {
       spawnCountRef.current[w.chinese] = 0;
@@ -227,11 +251,13 @@ export default function SkyDropPage() {
           if (t.exploding && t.explodeFrame > 20) return false;
           if (!t.exploding && t.y > groundY) {
             // Hit ground
+            missedWordsRef.current.add(t.word);
             livesRef.current--;
             setLives(livesRef.current);
             if (livesRef.current <= 0) {
               gameOverRef.current = true;
               setGameOver(true);
+              buildResults();
               if (recognitionRef.current) {
                 try {
                   recognitionRef.current.stop();
@@ -255,6 +281,7 @@ export default function SkyDropPage() {
       ) {
         gameOverRef.current = true;
         setYouWin(true);
+        buildResults();
         if (recognitionRef.current) {
           try {
             recognitionRef.current.stop();
@@ -428,52 +455,60 @@ export default function SkyDropPage() {
 
         {/* Game Over overlay */}
         {gameOver && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center z-20 bg-black/60">
-            <h2 className="text-5xl font-bold text-red-400 mb-4">Game Over</h2>
-            <p className="text-white text-xl mb-6">Final Score: {score}</p>
-            <div className="flex gap-4">
-              <button
-                onClick={() => {
-                  setGameStarted(false);
-                  setGameOver(false);
-                  setTiles([]);
-                }}
-                className="px-6 py-3 bg-green-500 text-white rounded-xl hover:bg-green-600 text-lg font-semibold"
-              >
-                Try Again
-              </button>
-              <button
-                onClick={() => router.push("/")}
-                className="px-6 py-3 bg-blue-500 text-white rounded-xl hover:bg-blue-600 text-lg font-semibold"
-              >
-                Home
-              </button>
+          <div className="absolute inset-0 z-20 bg-black/80 overflow-y-auto">
+            <div className="flex flex-col items-center py-12 px-4 min-h-full">
+              <h2 className="text-5xl font-bold text-red-400 mb-4">Game Over</h2>
+              <p className="text-white text-xl mb-6">Final Score: {score}</p>
+              {results && <ReviewResults won={results.won} lost={results.lost} />}
+              <div className="flex gap-4 mt-6">
+                <button
+                  onClick={() => {
+                    setGameStarted(false);
+                    setGameOver(false);
+                    setTiles([]);
+                    setResults(null);
+                  }}
+                  className="px-6 py-3 bg-green-500 text-white rounded-xl hover:bg-green-600 text-lg font-semibold"
+                >
+                  Try Again
+                </button>
+                <button
+                  onClick={() => router.push("/")}
+                  className="px-6 py-3 bg-blue-500 text-white rounded-xl hover:bg-blue-600 text-lg font-semibold"
+                >
+                  Home
+                </button>
+              </div>
             </div>
           </div>
         )}
 
         {/* You Win overlay */}
         {youWin && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center z-20 bg-black/60">
-            <h2 className="text-5xl font-bold text-green-400 mb-4">You Win!</h2>
-            <p className="text-white text-xl mb-6">Score: {score}</p>
-            <div className="flex gap-4">
-              <button
-                onClick={() => {
-                  setGameStarted(false);
-                  setYouWin(false);
-                  setTiles([]);
-                }}
-                className="px-6 py-3 bg-green-500 text-white rounded-xl hover:bg-green-600 text-lg font-semibold"
-              >
-                Play Again
-              </button>
-              <button
-                onClick={() => router.push("/")}
-                className="px-6 py-3 bg-blue-500 text-white rounded-xl hover:bg-blue-600 text-lg font-semibold"
-              >
-                Home
-              </button>
+          <div className="absolute inset-0 z-20 bg-black/80 overflow-y-auto">
+            <div className="flex flex-col items-center py-12 px-4 min-h-full">
+              <h2 className="text-5xl font-bold text-green-400 mb-4">You Win!</h2>
+              <p className="text-white text-xl mb-6">Score: {score}</p>
+              {results && <ReviewResults won={results.won} lost={results.lost} />}
+              <div className="flex gap-4 mt-6">
+                <button
+                  onClick={() => {
+                    setGameStarted(false);
+                    setYouWin(false);
+                    setTiles([]);
+                    setResults(null);
+                  }}
+                  className="px-6 py-3 bg-green-500 text-white rounded-xl hover:bg-green-600 text-lg font-semibold"
+                >
+                  Play Again
+                </button>
+                <button
+                  onClick={() => router.push("/")}
+                  className="px-6 py-3 bg-blue-500 text-white rounded-xl hover:bg-blue-600 text-lg font-semibold"
+                >
+                  Home
+                </button>
+              </div>
             </div>
           </div>
         )}

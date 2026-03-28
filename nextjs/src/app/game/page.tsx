@@ -2,27 +2,39 @@
 
 import { useSearchParams, useRouter } from "next/navigation";
 import { Suspense } from "react";
-import Sudoku from "@/components/games/Sudoku";
 import SlidingPuzzle from "@/components/games/SlidingPuzzle";
-import MemoryMatch from "@/components/games/MemoryMatch";
 import LightsOut from "@/components/games/LightsOut";
 import Minesweeper from "@/components/games/Minesweeper";
 import Wordle from "@/components/games/Wordle";
 import Nonogram from "@/components/games/Nonogram";
+import Snake from "@/components/games/Snake";
+import Game2048 from "@/components/games/Game2048";
+import Hangman from "@/components/games/Hangman";
+import WhackAMole from "@/components/games/WhackAMole";
+import FallingWords from "@/components/games/FallingWords";
+import Maze from "@/components/games/Maze";
+import SimonSays from "@/components/games/SimonSays";
+import Crossword from "@/components/games/Crossword";
 
 function GameContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const type = searchParams.get("type") || "sudoku";
+  const type = searchParams.get("type") || "sliding";
 
   const games: Record<string, React.ReactNode> = {
-    sudoku: <Sudoku />,
     sliding: <SlidingPuzzle />,
-    memory: <MemoryMatch />,
     lightsout: <LightsOut />,
     minesweeper: <Minesweeper />,
     wordle: <Wordle />,
     nonogram: <Nonogram />,
+    snake: <Snake />,
+    "2048": <Game2048 />,
+    hangman: <Hangman />,
+    whackamole: <WhackAMole />,
+    fallingwords: <FallingWords />,
+    maze: <Maze />,
+    simonsays: <SimonSays />,
+    crossword: <Crossword />,
   };
 
   const gameComponent = games[type];

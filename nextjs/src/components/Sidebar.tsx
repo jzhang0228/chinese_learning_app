@@ -17,13 +17,19 @@ const STAGES = [
 ];
 
 const ALL_GAMES = [
-  { key: "sudoku", label: "Sudoku" },
   { key: "sliding", label: "Sliding Puzzle" },
-  { key: "memory", label: "Memory Match" },
   { key: "lightsout", label: "Lights Out" },
   { key: "minesweeper", label: "Minesweeper" },
   { key: "wordle", label: "Wordle" },
   { key: "nonogram", label: "Nonogram" },
+  { key: "snake", label: "Snake" },
+  { key: "2048", label: "2048" },
+  { key: "hangman", label: "Hangman" },
+  { key: "whackamole", label: "Whack-a-Mole" },
+  { key: "fallingwords", label: "Falling Words" },
+  { key: "maze", label: "Maze" },
+  { key: "simonsays", label: "Simon Says" },
+  { key: "crossword", label: "Crossword" },
 ];
 
 export default function Sidebar() {

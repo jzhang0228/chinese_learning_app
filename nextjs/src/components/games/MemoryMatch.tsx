@@ -42,7 +42,6 @@ export default function MemoryMatch({ pairs, onWin }: MemoryMatchProps) {
 
   const initGame = useCallback(() => {
     const source = pairs || DEFAULT_PAIRS;
-    // Pick 8 random pairs
     const shuffled = [...source].sort(() => Math.random() - 0.5);
     const selected = shuffled.slice(0, 8);
 
@@ -52,7 +51,6 @@ export default function MemoryMatch({ pairs, onWin }: MemoryMatchProps) {
       cardList.push({ id: idx * 2 + 1, pairId: idx, text: pair.english, type: "english" });
     });
 
-    // Shuffle cards
     for (let i = cardList.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [cardList[i], cardList[j]] = [cardList[j], cardList[i]];
@@ -83,7 +81,6 @@ export default function MemoryMatch({ pairs, onWin }: MemoryMatchProps) {
       const card2 = cards.find((c) => c.id === second)!;
 
       if (card1.pairId === card2.pairId && card1.type !== card2.type) {
-        // Match
         const newMatched = new Set(matched);
         newMatched.add(first);
         newMatched.add(second);
@@ -96,7 +93,6 @@ export default function MemoryMatch({ pairs, onWin }: MemoryMatchProps) {
           onWin?.();
         }
       }
-      // Mismatch: wait for "Continue" button
     }
   };
 
@@ -152,7 +148,6 @@ export default function MemoryMatch({ pairs, onWin }: MemoryMatchProps) {
           You matched all pairs!
         </div>
       )}
-
     </div>
   );
 }
