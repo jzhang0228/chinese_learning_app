@@ -18,10 +18,10 @@ const STAGES = [
 
 const ALL_GAMES = [
   { key: "sudoku", label: "Sudoku" },
-  { key: "puzzle", label: "Puzzle" },
-  { key: "memory", label: "Memory" },
-  { key: "lights", label: "Lights" },
-  { key: "mines", label: "Mines" },
+  { key: "sliding", label: "Sliding Puzzle" },
+  { key: "memory", label: "Memory Match" },
+  { key: "lightsout", label: "Lights Out" },
+  { key: "minesweeper", label: "Minesweeper" },
   { key: "wordle", label: "Wordle" },
   { key: "nonogram", label: "Nonogram" },
 ];

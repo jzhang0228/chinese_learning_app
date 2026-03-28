@@ -105,12 +105,6 @@ export default function LightsOut() {
         </div>
       )}
 
-      <button
-        onClick={initGame}
-        className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-      >
-        New Game
-      </button>
     </div>
   );
 }

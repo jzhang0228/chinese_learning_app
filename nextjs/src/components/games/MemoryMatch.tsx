@@ -124,7 +124,7 @@ export default function MemoryMatch({ pairs, onWin }: MemoryMatchProps) {
             <button
               key={card.id}
               onClick={() => handleClick(card.id)}
-              className={`w-24 h-28 rounded-lg text-sm font-semibold transition-all border-2 ${
+              className={`w-24 h-28 rounded-lg font-semibold transition-all border-2 ${card.type === "chinese" ? "text-2xl" : "text-base"} ${
                 isMatched
                   ? "bg-green-200 border-green-500 text-green-800"
                   : isFlipped
@@ -153,12 +153,6 @@ export default function MemoryMatch({ pairs, onWin }: MemoryMatchProps) {
         </div>
       )}
 
-      <button
-        onClick={initGame}
-        className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-      >
-        New Game
-      </button>
     </div>
   );
 }
