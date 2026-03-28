@@ -9,8 +9,11 @@ export async function GET() {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    const db = getDb();
-    const row = db.prepare('SELECT manual_level FROM settings WHERE username = ?').get(username) as { manual_level: number | null } | undefined;
+    const db = await getDb();
+    const row = await db.get<{ manual_level: number | null }>(
+      'SELECT manual_level FROM settings WHERE username = ?',
+      [username]
+    );
 
     return NextResponse.json({ manual_level: row?.manual_level ?? null });
   } catch {
@@ -27,10 +30,11 @@ export async function POST(request: Request) {
 
     const { manual_level } = await request.json();
 
-    const db = getDb();
-    db.prepare(
-      'INSERT INTO settings (username, manual_level) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET manual_level = ?'
-    ).run(username, manual_level, manual_level);
+    const db = await getDb();
+    await db.run(
+      'INSERT INTO settings (username, manual_level) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET manual_level = ?',
+      [username, manual_level, manual_level]
+    );
 
     return NextResponse.json({ success: true });
   } catch {

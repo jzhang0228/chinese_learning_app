@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { getDb, isUniqueConstraintError } from '@/lib/db';
 import { getAuthenticatedUser } from '@/lib/auth';
 
 export async function GET() {
@@ -9,8 +9,11 @@ export async function GET() {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    const db = getDb();
-    const words = db.prepare('SELECT id, english, chinese, pinyin FROM learned_words WHERE username = ?').all(username);
+    const db = await getDb();
+    const words = await db.all<{ id: number; english: string; chinese: string; pinyin: string }>(
+      'SELECT id, english, chinese, pinyin FROM learned_words WHERE username = ?',
+      [username]
+    );
 
     return NextResponse.json({ words });
   } catch {
@@ -31,11 +34,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'english, chinese, and pinyin are required' }, { status: 400 });
     }
 
-    const db = getDb();
+    const db = await getDb();
     try {
-      db.prepare('INSERT INTO learned_words (username, english, chinese, pinyin) VALUES (?, ?, ?, ?)').run(username, english, chinese, pinyin);
+      await db.run(
+        'INSERT INTO learned_words (username, english, chinese, pinyin) VALUES (?, ?, ?, ?)',
+        [username, english, chinese, pinyin]
+      );
     } catch (e: unknown) {
-      if (e instanceof Error && e.message.includes('UNIQUE constraint')) {
+      if (isUniqueConstraintError(e)) {
         return NextResponse.json({ error: 'Word already saved' }, { status: 409 });
       }
       throw e;

@@ -6,23 +6,29 @@ export function hashPassword(password: string): string {
   return createHash('sha256').update(password).digest('hex');
 }
 
-export function createSession(username: string): string {
-  const db = getDb();
+export async function createSession(username: string): Promise<string> {
+  const db = await getDb();
   const token = randomBytes(32).toString('hex');
   const createdAt = Date.now() / 1000;
-  db.prepare('INSERT INTO sessions (token, username, created_at) VALUES (?, ?, ?)').run(token, username, createdAt);
+  await db.run(
+    'INSERT INTO sessions (token, username, created_at) VALUES (?, ?, ?)',
+    [token, username, createdAt]
+  );
   return token;
 }
 
-export function validateSession(token: string): string | null {
-  const db = getDb();
-  const row = db.prepare('SELECT username FROM sessions WHERE token = ?').get(token) as { username: string } | undefined;
+export async function validateSession(token: string): Promise<string | null> {
+  const db = await getDb();
+  const row = await db.get<{ username: string }>(
+    'SELECT username FROM sessions WHERE token = ?',
+    [token]
+  );
   return row ? row.username : null;
 }
 
-export function deleteSession(token: string): void {
-  const db = getDb();
-  db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+export async function deleteSession(token: string): Promise<void> {
+  const db = await getDb();
+  await db.run('DELETE FROM sessions WHERE token = ?', [token]);
 }
 
 export async function getSessionFromCookies(): Promise<string | null> {

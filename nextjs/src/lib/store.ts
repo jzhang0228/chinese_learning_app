@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useCallback, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 
 export interface ExampleSentence {
   chinese: string;
@@ -55,18 +55,19 @@ const initialState: StoreState = {
 const StoreContext = createContext<(StoreState & StoreActions) | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<StoreState>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("chinese_app_store");
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          return { ...initialState, ...parsed };
-        } catch {}
-      }
+  const [state, setState] = useState<StoreState>(initialState);
+
+  // Load persisted state from localStorage after mount (client-only).
+  // Keeping the initial render identical to the server avoids hydration errors.
+  useEffect(() => {
+    const saved = localStorage.getItem("chinese_app_store");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setState((prev) => ({ ...prev, ...parsed }));
+      } catch {}
     }
-    return initialState;
-  });
+  }, []);
 
   const persist = useCallback((newState: StoreState) => {
     setState(newState);

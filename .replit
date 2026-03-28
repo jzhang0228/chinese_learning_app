@@ -1,4 +1,4 @@
-modules = ["python-3.12", "postgresql-16"]
+modules = ["python-3.12", "postgresql-16", "nodejs-20"]
 [agent]
 expertMode = true
 
@@ -21,13 +21,13 @@ args = "Start application"
 name = "Start application"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "streamlit run app.py --server.port 5000"
-waitForPort = 5000
-
 [workflows.workflow.metadata]
 outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd nextjs && npm run dev -- -p 5000 -H 0.0.0.0"
+waitForPort = 5000
 
 [[ports]]
 localPort = 5000
@@ -35,4 +35,5 @@ externalPort = 80
 
 [deployment]
 deploymentTarget = "autoscale"
-run = ["streamlit", "run", "app.py", "--server.port", "5000"]
+run = "cd nextjs && npm start -- -p 5000 -H 0.0.0.0"
+build = "cd nextjs && npm run build"
