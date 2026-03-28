@@ -94,7 +94,7 @@ export default function Sidebar() {
           <div className="text-center text-sm mt-1" style={{ color: "var(--foreground)" }}>
             {store.pinyinText}
           </div>
-          <div className="text-center text-xs" style={{ color: "var(--muted)" }}>
+          <div className="text-center text-sm mt-0.5" style={{ color: "var(--foreground)" }}>
             {store.englishWord}
           </div>
         </div>

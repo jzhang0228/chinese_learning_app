@@ -14,10 +14,12 @@ export default function PronunciationQuizPage() {
   const [passed, setPassed] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [checking, setChecking] = useState(false);
+  const [heardPinyin, setHeardPinyin] = useState("");
 
   const handleResult = useCallback(
     async (transcript: string) => {
       setResult(transcript);
+      setHeardPinyin("");
       setChecking(true);
       try {
         const res = await fetch("/api/check-pronunciation", {
@@ -31,12 +33,13 @@ export default function PronunciationQuizPage() {
         });
         if (res.ok) {
           const data = await res.json();
+          if (data.transcriptPinyin) setHeardPinyin(data.transcriptPinyin);
           if (data.passed) {
             setPassed(true);
             setFeedback("Great pronunciation!");
             store.setPronQuizPassed(true);
           } else {
-            setFeedback(`Not quite. You said "${transcript}". Try again!`);
+            setFeedback(`Not quite. Try again!`);
           }
         } else {
           setFeedback(`Not quite. You said "${transcript}". Try again!`);
@@ -95,10 +98,11 @@ export default function PronunciationQuizPage() {
 
       {!checking && feedback && (
         <div
-          className={`mt-4 px-5 py-3 rounded-xl text-sm font-medium ${
+          className={`mt-4 px-5 py-3 rounded-xl text-sm font-medium text-center ${
             passed ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
           }`}
         >
+          {heardPinyin && <div className="mb-1">Heard: <strong>{heardPinyin}</strong></div>}
           {feedback}
         </div>
       )}

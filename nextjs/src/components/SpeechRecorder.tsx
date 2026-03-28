@@ -61,11 +61,7 @@ export default function SpeechRecorder({ onResult, language = "zh-CN" }: SpeechR
       >
         {listening ? "Listening..." : "Start Recording"}
       </button>
-      {transcript && (
-        <div className="text-sm mt-1" style={{ color: "var(--foreground)" }}>
-          Heard: <strong>{transcript}</strong>
-        </div>
-      )}
+
       {error && (
         <div className="text-sm mt-1 text-red-500">{error}</div>
       )}
